@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars */
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, TrendingUp, Network, BarChart3, Info } from 'lucide-react';
+import { Users, TrendingUp, Network, BarChart3, Info, Upload, File } from 'lucide-react';
 
 const SocialAnalyticsEngine = () => {
   const [nodes, setNodes] = useState([]);
@@ -8,7 +8,9 @@ const SocialAnalyticsEngine = () => {
   const [analytics, setAnalytics] = useState(null);
   const [inputText, setInputText] = useState('');
   const [activeTab, setActiveTab] = useState('input');
+  const [uploadedFileName, setUploadedFileName] = useState('');
   const canvasRef = useRef(null);
+  const fileInputRef = useRef(null);
   const animationRef = useRef(null);
   const [isAnimating, setIsAnimating] = useState(false);
 
@@ -51,6 +53,21 @@ Bob,Frank`;
     }));
 
     return { nodes: nodeList, edges: edgeList };
+  };
+
+  // Handle CSV file upload
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setUploadedFileName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target.result;
+      setInputText(text);
+    };
+    reader.readAsText(file);
   };
 
   // Calculate degree centrality
@@ -183,142 +200,79 @@ Bob,Frank`;
 
   // Force-directed layout simulation
   useEffect(() => {
-    if (nodes.length === 0 || !canvasRef.current || activeTab !== 'graph') {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-        setIsAnimating(false);
-      }
-      return;
+  if (nodes.length === 0 || !canvasRef.current || activeTab !== 'graph') {
+    return;
+  }
+
+  const canvas = canvasRef.current;
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+
+  // Position nodes statically (circular layout)
+  const radius = Math.min(width, height) / 2.5;
+  const centerX = width / 2;
+  const centerY = height / 2;
+
+  const nodeMap = {};
+  const angleStep = (2 * Math.PI) / nodes.length;
+
+  nodes.forEach((node, i) => {
+    const angle = i * angleStep;
+    node.x = centerX + radius * Math.cos(angle);
+    node.y = centerY + radius * Math.sin(angle);
+    nodeMap[node.id] = node;
+  });
+
+  // Clear canvas
+  ctx.clearRect(0, 0, width, height);
+
+  // Draw edges
+  ctx.strokeStyle = 'rgba(148,163,184,0.6)';
+  ctx.lineWidth = 1.5;
+  edges.forEach(edge => {
+    const source = nodeMap[edge.source];
+    const target = nodeMap[edge.target];
+    if (source && target) {
+      ctx.beginPath();
+      ctx.moveTo(source.x, source.y);
+      ctx.lineTo(target.x, target.y);
+      ctx.stroke();
     }
+  });
 
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
+  // Draw nodes
+  nodes.forEach(node => {
+    const size = analytics ? Math.max(8, Math.min(20, analytics.degree[node.id] * 3)) : 10;
+    const community = analytics?.communityMap[node.id] || 0;
+    const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
+    ctx.fillStyle = colors[community % colors.length];
 
-    const nodeMap = {};
-    nodes.forEach(n => nodeMap[n.id] = n);
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, size, 0, 2 * Math.PI);
+    ctx.fill();
 
-    setIsAnimating(true);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
-    let frameCount = 0;
-    const animate = () => {
-      ctx.clearRect(0, 0, width, height);
+    // Draw label
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = '#0f172a';
+    ctx.textAlign = 'center';
+    ctx.fillText(node.id, node.x, node.y - size - 8);
+  });
+}, [nodes, edges, analytics, activeTab]);
 
-      // Apply forces (slow down after 300 frames)
-      const damping = frameCount > 300 ? 0.95 : 0.85;
-      
-      nodes.forEach(node => {
-        let fx = 0, fy = 0;
-
-        // Repulsion between all nodes
-        nodes.forEach(other => {
-          if (node.id !== other.id) {
-            const dx = node.x - other.x;
-            const dy = node.y - other.y;
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            const force = 2000 / (dist * dist);
-            fx += (dx / dist) * force;
-            fy += (dy / dist) * force;
-          }
-        });
-
-        // Attraction along edges
-        edges.forEach(edge => {
-          let other = null;
-          if (edge.source === node.id) other = nodeMap[edge.target];
-          if (edge.target === node.id) other = nodeMap[edge.source];
-          
-          if (other) {
-            const dx = other.x - node.x;
-            const dy = other.y - node.y;
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            const force = dist * 0.015;
-            fx += (dx / dist) * force;
-            fy += (dy / dist) * force;
-          }
-        });
-
-        // Center gravity
-        fx += (width / 2 - node.x) * 0.002;
-        fy += (height / 2 - node.y) * 0.002;
-
-        node.vx = (node.vx + fx) * damping;
-        node.vy = (node.vy + fy) * damping;
-        node.x += node.vx;
-        node.y += node.vy;
-
-        // Boundaries
-        node.x = Math.max(40, Math.min(width - 40, node.x));
-        node.y = Math.max(40, Math.min(height - 40, node.y));
-      });
-
-      // Draw edges
-      ctx.strokeStyle = '#94a3b8';
-      ctx.lineWidth = 2;
-      edges.forEach(edge => {
-        const source = nodeMap[edge.source];
-        const target = nodeMap[edge.target];
-        if (source && target) {
-          ctx.beginPath();
-          ctx.moveTo(source.x, source.y);
-          ctx.lineTo(target.x, target.y);
-          ctx.stroke();
-        }
-      });
-
-      // Draw nodes
-      nodes.forEach(node => {
-        const size = analytics ? 
-          Math.max(10, Math.min(25, analytics.degree[node.id] * 4)) : 12;
-        
-        const community = analytics?.communityMap[node.id] || 0;
-        const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
-        ctx.fillStyle = colors[community % colors.length];
-        
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, size, 0, 2 * Math.PI);
-        ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-
-        // Draw labels
-        ctx.fillStyle = '#1e293b';
-        ctx.font = 'bold 13px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        
-        // Background for text
-        const textWidth = ctx.measureText(node.id).width;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.fillRect(node.x - textWidth/2 - 4, node.y - size - 20, textWidth + 8, 18);
-        
-        ctx.fillStyle = '#1e293b';
-        ctx.fillText(node.id, node.x, node.y - size - 11);
-      });
-
-      frameCount++;
-      animationRef.current = requestAnimationFrame(animate);
-    };
-
-    animate();
-
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-        setIsAnimating(false);
-      }
-    };
-  }, [nodes, edges, analytics, activeTab]);
 
   const handleLoadSample = () => {
     setInputText(sampleData);
+    setUploadedFileName('');
   };
 
   const handleAnalyze = () => {
     if (!inputText.trim()) {
-      alert('Please enter some connection data first!');
+      alert('Please enter some connection data or upload a CSV file first!');
       return;
     }
     
@@ -409,9 +363,42 @@ Bob,Frank`;
                   <div className="text-sm text-blue-900">
                     <p className="font-semibold mb-1">How to use:</p>
                     <p>Enter connections in the format: <code className="bg-white px-2 py-0.5 rounded">Person1,Person2</code></p>
-                    <p className="mt-1">Each line represents a connection between two people.</p>
+                    <p className="mt-1">Each line represents a connection between two people. You can also upload a CSV file.</p>
                   </div>
                 </div>
+
+                {/* File Upload Section */}
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 bg-gray-50 hover:bg-gray-100 transition">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,.txt"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full flex flex-col items-center gap-3"
+                  >
+                    <Upload className="w-12 h-12 text-gray-400" />
+                    <div className="text-center">
+                      <p className="text-sm font-semibold text-gray-700">
+                        Click to upload CSV file
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        or drag and drop your file here
+                      </p>
+                    </div>
+                    {uploadedFileName && (
+                      <div className="flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-800 rounded-lg">
+                        <File className="w-4 h-4" />
+                        <span className="text-sm font-medium">{uploadedFileName}</span>
+                      </div>
+                    )}
+                  </button>
+                </div>
+
+                <div className="text-center text-sm text-gray-500 font-semibold">OR</div>
 
                 <textarea
                   value={inputText}
